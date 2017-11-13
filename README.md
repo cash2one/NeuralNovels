@@ -1,4 +1,4 @@
-# NeuralNovels
+# Neural Novels
 Repo for [my work on NaNoGenMo 2017](https://github.com/NaNoGenMo/2017/issues/98).
 
 ## Progress so far
