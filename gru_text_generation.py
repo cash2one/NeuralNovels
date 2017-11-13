@@ -124,7 +124,7 @@ if __name__ == '__main__':
     if FLAGS.mode == 'train':
         train(FLAGS.iter)
     elif FLAGS.mode == 'generate':
-        generate(FLAGS.chars, stream=open('./generated.txt', 'w'))
+        generate(FLAGS.chars, stream=open('./generated.md', 'w'))
     else:
         print('Unrecognized mode', FLAGS.mode)
         raise TypeError
