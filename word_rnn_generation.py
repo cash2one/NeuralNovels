@@ -1,35 +1,51 @@
 from __future__ import print_function
 from keras.models import Sequential, load_model
-from keras.layers import Dense, Activation
-from keras.layers import GRU
-from keras.optimizers import Adam
+from keras.layers import Dense, Activation, GRU, BatchNormalization, Dropout
+from keras.optimizers import RMSprop
 from keras.utils import to_categorical
 import numpy as np
 from progressbar import ProgressBar
-import random, sys, argparse, operator
+import random, sys, argparse, operator, gc
+from time import sleep
 
 from book_utils import *
 from embedding_utils import *
 
 file_names = get_file_names_written_by('George Alfred Henty')
-text = ''.join(get_files_contents(file_names))[:2000000]
+text = ''.join(get_files_contents(file_names))
+print('text length', len(text))
 
 print('Tokenizing...')
-words, word_index = tokenize_words(text, 12000)
+words, word_index = tokenize_words(text, 15000)
 idx_to_word = {v: k for k, v in word_index.items()} 
 
-# cut the text in semi-redundant sequences of maxlen words
 maxlen = 20
 step = 3
-sentences = []
-next_words = []
-for i in range(0, len(words) - maxlen, step):
-    sentences.append(words[i: i + maxlen])
-    next_words.append(words[i + maxlen])
-print('nb sequences:', len(sentences))
-x = np.array(sentences)
-y = to_categorical(next_words)
-print(x[0])
+batch_size = 512
+# Derived using formula for length of range at stackoverflow.com/questions/31839032
+total_samples = (len(words) - maxlen - 1) // step + 1
+def get_chunk():
+    # cut the text in semi-redundant sequences of maxlen words
+    words_idx = 0
+
+    # I derived this using the formula for the length of a range and wolfram alpha. It should work
+    words_per_batch = (batch_size - 1) * step + maxlen + 1
+    while True:
+        if (words_idx + 1) * words_per_batch >= len(words): words_idx = 0
+        words_batch = words[words_idx * words_per_batch : (words_idx + 1) * words_per_batch]
+        sentences = []
+        next_words = []
+
+        for i in range(0, words_per_batch - maxlen, step):
+            sentences.append(words_batch[i: i + maxlen])
+            next_words.append(words_batch[i + maxlen])
+
+        x = np.array(sentences)
+        y = to_categorical(next_words, num_classes=len(word_index))
+
+        yield (x, y)
+
+        words_idx += 1
 
 def build_model(load_weights):
     # build the model
@@ -37,26 +53,25 @@ def build_model(load_weights):
     if load_weights:
         return load_model('gru_word_rnn.h5')
     else:
-        model = Sequential()
-        model.add(get_embedding_layer(word_index, maxlen))
-        model.add(GRU(128, dropout=0.5, recurrent_dropout=0.25, return_sequences=True))
-        model.add(GRU(128, dropout=0.5, recurrent_dropout=0.25, return_sequences=True))
-        model.add(GRU(128, dropout=0.5, recurrent_dropout=0.25))
-        model.add(Dense(len(word_index), activation='softmax'))
+        model = Sequential([
+                    get_embedding_layer(word_index, maxlen),
+                    GRU(128, dropout=0.4, recurrent_dropout=0.1, return_sequences=True),
+                    GRU(128, dropout=0.4, recurrent_dropout=0.1),
+                    Dense(len(word_index), activation='softmax')
+            ])
+        model.compile(loss='categorical_crossentropy', optimizer='rmsprop', metrics=['acc'])
         return model
 
 def train(n_iter, n_words, beam_width):
     # train the model, output generated text after each iteration
     model = build_model(False)
-    for iteration in range(1, n_iter):
+    val_data = next(get_chunk())
+    for iteration in range(1, n_iter + 1):
         print()
         print('-' * 50)
         print('Iteration', iteration)
-        model.fit(x, y,
-                  batch_size=512,
-                  epochs=2,
-                  validation_split=0.05)
-    
+        model.fit_generator(get_chunk(), int(total_samples / batch_size), epochs=1, validation_data=val_data)
+
         for diversity in [1.2, 1.4, 1.6, 1.8]:
             print()
             beam_search(model, n_words, beam_width, diversity, sys.stdout)
@@ -115,11 +130,11 @@ def beam_search(model, n_words, beam_width, diversity, stream):
 
     stream.write(detokenize(beams[0]['sentence'], idx_to_word))
 
-parser = argparse.ArgumentParser(description='train/generate text with GRU word rnn')
+parser = argparse.ArgumentParser(description='train/generate text with word rnn')
 parser.add_argument('--mode', type=str, default='train', help='Either "train" or "generate"')
-parser.add_argument('--iter', type=int, default=80, help='Number of training iterations')
-parser.add_argument('--words', type=int, default=50, help='Number of words for  beam search')
-parser.add_argument('--diversity', type=float, default=1.2, help='Temperature for beam search')
+parser.add_argument('--iter', type=int, default=10, help='Number of training iterations')
+parser.add_argument('--words', type=int, default=80, help='Number of words for  beam search')
+parser.add_argument('--diversity', type=float, default=1.6, help='Temperature for beam search')
 parser.add_argument('--beam_width', type=int, default=30, help='Beam width for beam search')
 
 FLAGS = parser.parse_args()
