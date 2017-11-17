@@ -1,6 +1,6 @@
 from __future__ import print_function
 from keras.models import Sequential, load_model
-from keras.layers import Dense, Activation, GRU, BatchNormalization, Dropout
+from keras.layers import Dense, Activation, LSTM, BatchNormalization, Dropout
 from keras.optimizers import RMSprop
 from keras.utils import to_categorical
 import numpy as np
@@ -16,23 +16,28 @@ text = ''.join(get_files_contents(file_names))
 print('text length', len(text))
 
 print('Tokenizing...')
-words, word_index = tokenize_words(text, 15000)
-idx_to_word = {v: k for k, v in word_index.items()} 
+words, word_index, idx_to_word = tokenize_words(text, 15000)
 
-maxlen = 20
+# TODO: probably have a more random way of doing the train/val split
+val_split = 0.05
+train_words = words[:int((1 - val_split) * len(words))]
+val_words = words[int(val_split * len(words)):]
+
+maxlen = 30
 step = 3
 batch_size = 512
 # Derived using formula for length of range at stackoverflow.com/questions/31839032
-total_samples = (len(words) - maxlen - 1) // step + 1
-def get_chunk():
+total_train_samples = (len(train_words) - maxlen - 1) // step + 1
+total_val_samples = (len(val_words) - maxlen - 1) // step + 1
+def get_chunk(data):
     # cut the text in semi-redundant sequences of maxlen words
     words_idx = 0
 
     # I derived this using the formula for the length of a range and wolfram alpha. It should work
     words_per_batch = (batch_size - 1) * step + maxlen + 1
     while True:
-        if (words_idx + 1) * words_per_batch >= len(words): words_idx = 0
-        words_batch = words[words_idx * words_per_batch : (words_idx + 1) * words_per_batch]
+        if (words_idx + 1) * words_per_batch >= len(data): words_idx = 0
+        words_batch = data[words_idx * words_per_batch : (words_idx + 1) * words_per_batch]
         sentences = []
         next_words = []
 
@@ -55,22 +60,27 @@ def build_model(load_weights):
     else:
         model = Sequential([
                     get_embedding_layer(word_index, maxlen),
-                    GRU(128, dropout=0.4, recurrent_dropout=0.1, return_sequences=True),
-                    GRU(128, dropout=0.4, recurrent_dropout=0.1),
+                    LSTM(650, dropout=0.4, recurrent_dropout=0.2, return_sequences=True),
+                    LSTM(650, dropout=0.4, recurrent_dropout=0.2, return_sequences=True),
+                    LSTM(650, dropout=0.4, recurrent_dropout=0.2),
                     Dense(len(word_index), activation='softmax')
             ])
         model.compile(loss='categorical_crossentropy', optimizer='rmsprop', metrics=['acc'])
+        model.summary()
         return model
 
 def train(n_iter, n_words, beam_width):
     # train the model, output generated text after each iteration
     model = build_model(False)
-    val_data = next(get_chunk())
     for iteration in range(1, n_iter + 1):
         print()
         print('-' * 50)
         print('Iteration', iteration)
-        model.fit_generator(get_chunk(), int(total_samples / batch_size), epochs=1, validation_data=val_data)
+        model.fit_generator(get_chunk(train_words),
+                            total_train_samples // batch_size,
+                            epochs=1,
+                            validation_data=get_chunk(val_words),
+                            validation_steps=total_val_samples // batch_size)
 
         for diversity in [1.2, 1.4, 1.6, 1.8]:
             print()

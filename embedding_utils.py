@@ -9,16 +9,17 @@ def tokenize_words(text, vocab_size):
     open('/tmp/in.txt', 'w').write(text)
     os.system('~/Code/dl/datasets/stanford-parser-full-2017-06-09/tokenize.sh')
     tokens = open('/tmp/out.txt').read().split()
+    print('Total tokens in dataset', len(tokens))
 
     top_tokens = [tok for (tok, cnt) in Counter(tokens).most_common(vocab_size - 1)] # -1 for UNK
     word_index = {tok: idx for (idx, tok) in enumerate(top_tokens)}
     unk_index = len(word_index)
     word_index['<UNK>'] = unk_index
-    sequences = [word_index.get(tok, unk_index) for tok in tokens]
-    print('sequence len', len(sequences))
-
     print('Found {} unique tokens.'.format(len(word_index)))
-    return (sequences, word_index)
+
+    sequences = [word_index.get(tok, unk_index) for tok in tokens]
+    idx_to_word = {v: k for k, v in word_index.items()} 
+    return (sequences, word_index, idx_to_word)
 
 def detokenize(words, idx_to_word):
     word_list = [idx_to_word[idx] for idx in words]
